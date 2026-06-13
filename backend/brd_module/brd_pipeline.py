@@ -22,7 +22,7 @@ from pathlib import Path
 _HERE = Path(__file__).parent
 load_dotenv(_HERE / ".env")
 
-from openai import OpenAI, APIConnectionError, RateLimitError, APIStatusError
+from groq import Groq, APIConnectionError, RateLimitError, APIStatusError
 from brd_module.storage import create_snapshot, get_signals_for_snapshot, store_brd_section
 from brd_module.hitl.versioned_ledger import is_section_locked, get_section_content, create_new_version
 
@@ -39,10 +39,10 @@ def _strip_source_id_annotations(text: str) -> str:
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
-def call_llm_with_retry(client: OpenAI, messages: List[Dict[str, str]], json_mode: bool = False, max_tokens: int = 2048) -> str:
-    """Resilient LLM caller with exponential backoff. Model is resolved from OPENROUTER_MODEL env var
-    or defaults to openrouter/owl-alpha."""
-    MODEL_NAME = os.environ.get("OPENROUTER_MODEL", "openrouter/owl-alpha")
+def call_llm_with_retry(client: Groq, messages: List[Dict[str, str]], json_mode: bool = False, max_tokens: int = 2048) -> str:
+    """Resilient LLM caller with exponential backoff. Model is resolved from GROQ_MODEL env var
+    or defaults to llama-3.3-70b-versatile."""
+    MODEL_NAME = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
     response_format = {"type": "json_object"} if json_mode else None
 
     import re
@@ -94,12 +94,12 @@ def call_llm_with_retry(client: OpenAI, messages: List[Dict[str, str]], json_mod
 
 # ─── Phase 1 Agents ─────────────────────────────────────────────────────────
 
-def frd_agent(session_id: str, snapshot_id: str, client: Optional[OpenAI] = None, additional_context: str = "") -> str:
+def frd_agent(session_id: str, snapshot_id: str, client: Groq = None, additional_context: str = "") -> str:
     """Functional Requirements Document agent — generates the core functional requirements."""
     if is_section_locked(session_id, 'functional_requirements') and not additional_context:
         return get_section_content(session_id, 'functional_requirements')
     if client is None:
-        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ.get("OPENROUTER_API_KEY", ""))
+        client = Groq(api_key=os.environ.get("GROQ_CLOUD_API", ""))
 
     reqs = get_signals_for_snapshot(snapshot_id, label_filter='requirement')
     reqs = reqs[:30]
@@ -154,12 +154,12 @@ Output ONLY the final markdown content for this section. Do not wrap in markdown
     return content
 
 
-def nfrd_agent(session_id: str, snapshot_id: str, client: Optional[OpenAI] = None, additional_context: str = "") -> str:
+def nfrd_agent(session_id: str, snapshot_id: str, client: Groq = None, additional_context: str = "") -> str:
     """Non-Functional Requirements Document agent — generates NFRD sections."""
     if is_section_locked(session_id, 'nfrd') and not additional_context:
         return get_section_content(session_id, 'nfrd')
     if client is None:
-        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ.get("OPENROUTER_API_KEY", ""))
+        client = Groq(api_key=os.environ.get("GROQ_CLOUD_API", ""))
 
     # Gather signals that hint at non-functional requirements
     all_signals = get_signals_for_snapshot(snapshot_id)
@@ -234,12 +234,12 @@ Output ONLY the final markdown content for this section. Do not wrap in markdown
     return content
 
 
-def stakeholder_agent(session_id: str, snapshot_id: str, client: Optional[OpenAI] = None, additional_context: str = "") -> str:
+def stakeholder_agent(session_id: str, snapshot_id: str, client: Groq = None, additional_context: str = "") -> str:
     """Stakeholder Analysis agent — identifies and analyzes project stakeholders."""
     if is_section_locked(session_id, 'stakeholder_analysis') and not additional_context:
         return get_section_content(session_id, 'stakeholder_analysis')
     if client is None:
-        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ.get("OPENROUTER_API_KEY", ""))
+        client = Groq(api_key=os.environ.get("GROQ_CLOUD_API", ""))
 
     all_signals = get_signals_for_snapshot(snapshot_id)
     all_signals = all_signals[:30]
@@ -311,12 +311,12 @@ Output ONLY the final markdown content for this section. Do not wrap in markdown
 
 # ─── Phase 2 Agents ─────────────────────────────────────────────────────────
 
-def timeline_agent(session_id: str, snapshot_id: str, client: Optional[OpenAI] = None, additional_context: str = "") -> str:
+def timeline_agent(session_id: str, snapshot_id: str, client: Groq = None, additional_context: str = "") -> str:
     """Timeline agent — generates project timeline, milestones, and deadlines."""
     if is_section_locked(session_id, 'timeline') and not additional_context:
         return get_section_content(session_id, 'timeline')
     if client is None:
-        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ.get("OPENROUTER_API_KEY", ""))
+        client = Groq(api_key=os.environ.get("GROQ_CLOUD_API", ""))
 
     timeline_refs = get_signals_for_snapshot(snapshot_id, label_filter='timeline_reference')
     timeline_refs = timeline_refs[:25]
@@ -372,12 +372,12 @@ Output ONLY the final markdown content for this section.
     return content
 
 
-def business_rules_agent(session_id: str, snapshot_id: str, client: Optional[OpenAI] = None, additional_context: str = "") -> str:
+def business_rules_agent(session_id: str, snapshot_id: str, client: Groq = None, additional_context: str = "") -> str:
     """Business Rules agent — generates business rules, constraints, and policies."""
     if is_section_locked(session_id, 'decisions') and not additional_context:
         return get_section_content(session_id, 'decisions')
     if client is None:
-        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ.get("OPENROUTER_API_KEY", ""))
+        client = Groq(api_key=os.environ.get("GROQ_CLOUD_API", ""))
 
     decision_refs = get_signals_for_snapshot(snapshot_id, label_filter='decision')
     decision_refs = decision_refs[:20]
@@ -432,12 +432,12 @@ Output ONLY the final markdown content for this section.
     return content
 
 
-def assumptions_risks_agent(session_id: str, snapshot_id: str, client: Optional[OpenAI] = None, additional_context: str = "") -> str:
+def assumptions_risks_agent(session_id: str, snapshot_id: str, client: Groq = None, additional_context: str = "") -> str:
     """Assumptions & Risks agent — generates project assumptions and risk register."""
     if is_section_locked(session_id, 'assumptions_risks') and not additional_context:
         return get_section_content(session_id, 'assumptions_risks')
     if client is None:
-        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ.get("OPENROUTER_API_KEY", ""))
+        client = Groq(api_key=os.environ.get("GROQ_CLOUD_API", ""))
 
     all_refs = get_signals_for_snapshot(snapshot_id)
     if not all_refs and not additional_context:
@@ -493,12 +493,12 @@ Output ONLY the final markdown content for this section.
     return content
 
 
-def success_metrics_agent(session_id: str, snapshot_id: str, client: Optional[OpenAI] = None, additional_context: str = "") -> str:
+def success_metrics_agent(session_id: str, snapshot_id: str, client: Groq = None, additional_context: str = "") -> str:
     """Success Metrics agent — derives measurable success criteria."""
     if is_section_locked(session_id, 'success_metrics') and not additional_context:
         return get_section_content(session_id, 'success_metrics')
     if client is None:
-        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ.get("OPENROUTER_API_KEY", ""))
+        client = Groq(api_key=os.environ.get("GROQ_CLOUD_API", ""))
 
     signals = []
     signals.extend(get_signals_for_snapshot(snapshot_id, label_filter='requirement'))
@@ -556,12 +556,12 @@ Output ONLY the final markdown content for this section.
 
 # ─── Phase 3 Agents ─────────────────────────────────────────────────────────
 
-def executive_summary_agent(session_id: str, snapshot_id: str, client: Optional[OpenAI] = None, additional_context: str = "") -> str:
+def executive_summary_agent(session_id: str, snapshot_id: str, client: Groq = None, additional_context: str = "") -> str:
     """Runs LAST after all other agents. Reads all Phase 1 + Phase 2 outputs."""
     if is_section_locked(session_id, 'executive_summary') and not additional_context:
         return get_section_content(session_id, 'executive_summary')
     if client is None:
-        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ.get("OPENROUTER_API_KEY", ""))
+        client = Groq(api_key=os.environ.get("GROQ_CLOUD_API", ""))
 
     from brd_module.storage import get_latest_brd_sections
 
@@ -630,7 +630,7 @@ def _build_phase2_context(agent_name: str, phase1_results: dict) -> str:
     return "Context from Phase 1 agents (use these to ensure consistency and avoid conflicts):" + "".join(sections)
 
 
-def _run_parallel(agents_dict: dict, session_id: str, snapshot_id: str, client: OpenAI,
+def _run_parallel(agents_dict: dict, session_id: str, snapshot_id: str, client: Groq,
                   emit: Callable, phase1_context: dict = None) -> dict:
     """Run agents in parallel, return dict of section_name -> content."""
     results = {}
@@ -663,7 +663,7 @@ def _run_parallel(agents_dict: dict, session_id: str, snapshot_id: str, client: 
 
 def run_brd_generation(
     session_id: str,
-    client: Optional[OpenAI] = None,
+    client: Groq = None,
     on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> str:
     """
@@ -675,7 +675,7 @@ def run_brd_generation(
       Phase 3 (sequential): Executive Summary → Validation Agent
     """
     if client is None:
-        client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=os.environ.get("OPENROUTER_API_KEY", ""))
+        client = Groq(api_key=os.environ.get("GROQ_CLOUD_API", ""))
 
     print(f"[{session_id}] Starting BRD Generation...")
 
@@ -740,7 +740,7 @@ def run_single_agent(
     session_id: str,
     snapshot_id: str,
     section_name: str,
-    client: OpenAI,
+    client: Groq,
     additional_context: str = ""
 ) -> str:
     """Dispatches to a specific agent for ad-hoc regeneration."""

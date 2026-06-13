@@ -17,11 +17,11 @@ def _import_adk():
 
 
 def get_adk_model():
-    """Create the shared ADK model instance backed by OpenRouter."""
+    """Create the shared ADK model instance backed by Groq."""
     LiteLlm, _, _ = _import_adk()
-    model_name = os.environ.get("OPENROUTER_MODEL", "openrouter/owl-alpha")
-    api_key = os.environ.get("OPENROUTER_API_KEY", "")
-    return LiteLlm(model=model_name, api_key=api_key)
+    model_name = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+    api_key = os.environ.get("GROQ_CLOUD_API", "")
+    return LiteLlm(model=f"groq/{model_name}", api_key=api_key)
 
 
 def get_session_service():

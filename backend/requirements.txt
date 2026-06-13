@@ -3,7 +3,7 @@ fastapi>=0.100.0
 uvicorn>=0.22.0
 
 # LLM and AI
-openai>=1.50.0  # Used with OpenRouter base_url for LLM calls
+groq>=0.4.0  # Groq SDK for LLM calls (BRD pipeline + classifier + HITL)
 google-cloud-vision>=3.4.0
 google-cloud-firestore>=2.11.0
 google-api-python-client>=2.95.0
