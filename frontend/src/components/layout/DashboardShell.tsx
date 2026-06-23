@@ -283,7 +283,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
 
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [modalOpen, setModalOpen] = useState(false);
-    const [apiConnected, setApiConnected] = useState(false);
+    // const [apiConnected, setApiConnected] = useState(false);
     const [signalCount, setSignalCount] = useState(0);
     const [flagCount, setFlagCount] = useState(0);
     const [flags, setFlags] = useState<ValidationFlag[]>([]);
@@ -291,6 +291,19 @@ export default function DashboardShell({ children }: { children: React.ReactNode
     const notifRef = useRef<HTMLDivElement>(null);
     const [stages, setStages] = useState<StageInfo[]>(EMPTY_STAGES);
 
+    useEffect(() => {
+        const onMouseDown = (e: MouseEvent) => {
+            if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+                setNotifOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", onMouseDown);
+        return () => document.removeEventListener("mousedown", onMouseDown);
+    }, []);
+
+    // NOTE: Backend connectivity polling disabled — was hitting GET / every 30s.
+    // Uncomment below to re-enable if needed.
+    /*
     useEffect(() => {
         const checkApi = async () => {
             const base = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
@@ -306,16 +319,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
         const timer = window.setInterval(checkApi, 30000);
         return () => window.clearInterval(timer);
     }, []);
-
-    useEffect(() => {
-        const onMouseDown = (e: MouseEvent) => {
-            if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
-                setNotifOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", onMouseDown);
-        return () => document.removeEventListener("mousedown", onMouseDown);
-    }, []);
+    */
 
     useEffect(() => {
         const loadStageStatus = async () => {
@@ -459,6 +463,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
                                     </div>
                                 )}
 
+                                {/* // Backend connectivity indicator disabled — uncomment to re-enable
                                 <div className="flex items-center justify-between px-1">
                                     <div className="flex items-center gap-1.5">
                                         {apiConnected ? <Wifi size={12} className="text-emerald-400" /> : <WifiOff size={12} className="text-red-400" />}
@@ -466,6 +471,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
                                     </div>
                                     <div className={cn("w-1.5 h-1.5 rounded-full", apiConnected ? "bg-emerald-400" : "bg-red-400")} />
                                 </div>
+                                */}
 
                                 <Link
                                     href="/profile"
