@@ -12,6 +12,7 @@ AI-Powered Business Requirements Document generation platform with a stunning da
 - **Data Ingestion** panel with live logs
 - **AI Agent Orchestrator** (4 agents: Ingestion, Structure, Validation, Writing)
 - **BRD Editor** with outline, citations, and AI assistant
+- **BRD Draft Editor** (`/brd/draft`) — NLP-powered draft input with section classification and per-section custom prompts
 - **Analytics** dashboards:
   - Conflict Detection
   - Requirement Traceability
@@ -66,11 +67,15 @@ vercel --prod
 ```
 frontend/
 ├── src/
-│   ├── app/              # Next.js pages
+│   ├── app/              # Next.js pages (including /brd/draft)
 │   ├── components/       # React components
-│   ├── store/           # Zustand stores
-│   ├── lib/             # Utilities
-│   └── styles/          # Global styles
+│   │   ├── workspace/    # NLPInputPanel, SectionPromptEditor, BRDEditor, AgentOrchestrator
+│   │   ├── layout/       # DashboardShell, Navbar
+│   │   └── ui/           # Radix + custom UI primitives
+│   ├── lib/              # apiClient, firebase, nlpClassify utilities
+│   ├── store/           # Zustand stores (useBRDStore with NLP + custom prompts)
+│   ├── types/           # Type declarations
+│   └── contexts/        # AuthContext
 ├── public/              # Static assets
 └── package.json
 ```

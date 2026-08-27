@@ -51,6 +51,9 @@
 | 🔍 **Signal Traceability** | Every requirement traced back to its original source chunk and speaker |
 | 📊 **Real-Time Streaming** | SSE-powered live agent progress during BRD generation |
 | 🔐 **Secure Auth** | Firebase Authentication with session cookies and middleware route protection |
+| ✍️ **NLP Draft Input** | Freeform project description with real-time section classification and relevance scoring |
+| 🎯 **Section Prompt Editor** | Per-section custom AI prompts — override default instructions for targeted generation |
+| 📝 **Draft Editor Page** | 3-panel `/brd/draft` — NLP input, section cards, and prompt editor side-by-side |
 
 ---
 
@@ -365,6 +368,9 @@ flowchart TD
 | `src/components/workspace/AgentOrchestrator.tsx` | BRD generation UI + SSE stream consumer |
 | `src/components/workspace/IngestionPanel.tsx` | File upload, demo ingest, log stream |
 | `src/components/workspace/BRDEditor.tsx` | Section cards, human editing, lock control |
+| `src/components/workspace/NLPInputPanel.tsx` | Freeform draft input with NLP section classification |
+| `src/components/workspace/SectionPromptEditor.tsx` | Per-section custom prompt editor with defaults |
+| `src/lib/nlpClassify.ts` | Client-side keyword-based NLP classification for BRD sections |
 
 ---
 
@@ -619,6 +625,7 @@ invites/{token}              ← boardId + role + expiry (24h TTL)
 | `GET` | `/sessions/{id}/brd/generate/stream` | SSE streaming with real-time agent progress |
 | `GET` | `/sessions/{id}/brd/` | Get latest BRD sections + meta + validation flags |
 | `PUT` | `/sessions/{id}/brd/sections/{section_name}` | Update or lock a section with human content |
+| `POST` | `/sessions/{id}/brd/sections/{section_name}/generate` | Regenerate a single section — accepts optional `additional_context` for NLP/custom prompt guidance |
 | `GET` | `/sessions/{id}/brd/export?format=markdown\|html\|docx` | Download BRD in chosen format |
 
 ### HITL
@@ -653,6 +660,7 @@ invites/{token}              ← boardId + role + expiry (24h TTL)
 | `/ingestion` | Protected | Data ingestion — upload, demo, Slack |
 | `/signals` | Protected | Signal review — active and suppressed |
 | `/brd` | Protected | BRD editor — sections, flags, editing |
+| `/brd/draft` | Protected | BRD Draft Editor — NLP input, section cards, custom prompts |
 | `/export` | Protected | Export as `.md`, `.html`, `.docx` |
 | `/profile` | Protected | Integrations (Slack, Gmail) and settings |
 | `/invite/[token]` | Public | Join a shared board via invite link |
@@ -742,7 +750,7 @@ Beacon/
         ├── middleware.ts        ← Route protection
         ├── app/                 ← App Router pages
         ├── components/
-        │   ├── workspace/       ← IngestionPanel, BRDEditor, AgentOrchestrator
+        │   ├── workspace/       ← IngestionPanel, BRDEditor, AgentOrchestrator, NLPInputPanel, SectionPromptEditor
         │   ├── layout/          ← DashboardShell, Navbar
         │   └── ui/              ← Radix + custom UI primitives
         ├── contexts/
@@ -750,7 +758,8 @@ Beacon/
         ├── lib/
         │   ├── apiClient.ts     ← Typed FastAPI client
         │   ├── firebase.ts      ← Client SDK
-        │   └── firebaseAdmin.ts ← Server-only Admin SDK
+        │   ├── firebaseAdmin.ts ← Server-only Admin SDK
+        │   └── nlpClassify.ts   ← NLP classification utility for BRD sections
         └── store/
             └── useBRDStore.ts   ← Zustand store
 ```
