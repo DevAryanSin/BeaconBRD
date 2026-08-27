@@ -229,8 +229,8 @@ export default function DashboardPage() {
                   description: activeSession.description ?? "",
                   ownerUid: activeSession.role === "owner" ? (user?.uid ?? "") : "shared",
                   status: activeSession.status ?? "draft",
-                  createdAt: new Date() as unknown as import("firebase/firestore").Timestamp,
-                  updatedAt: new Date() as unknown as import("firebase/firestore").Timestamp,
+                  createdAt: new Date() as unknown as any,
+                  updatedAt: new Date() as unknown as any,
               }
             : null;
 

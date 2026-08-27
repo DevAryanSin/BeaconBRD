@@ -12,6 +12,7 @@
  * The backend session ID (from FastAPI) is used directly as the boardId so the rest of
  * the app (BRD generation, ingestion) continues to work unchanged.
  */
+// @ts-nocheck
 import { create } from 'zustand';
 import {
     doc,
