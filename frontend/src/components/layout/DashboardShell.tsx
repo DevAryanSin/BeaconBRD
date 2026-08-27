@@ -41,6 +41,7 @@ const navigation = [
     { name: "Sources", href: "/ingestion", icon: Database, stageIndex: 0 },
     { name: "Signals", href: "/signals", icon: Zap, stageIndex: 1 },
     { name: "BRD Draft", href: "/brd", icon: FileText, stageIndex: 3 },
+    { name: "Draft Editor", href: "/brd/draft", icon: FileText, stageIndex: 3 },
     { name: "Export", href: "/export", icon: Download, stageIndex: 5 },
     { name: "Settings", href: "/settings", icon: Settings, stageIndex: -1 },
 ];

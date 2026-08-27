@@ -1,6 +1,6 @@
 /**
  * useBRDStore.ts
- * Zustand store for BRD sections and conflicts.
+ * Zustand store for BRD sections, conflicts, NLP input, and custom prompts.
  * Wired to the real FastAPI backend via apiClient.ts.
  */
 import { create } from 'zustand';
@@ -38,6 +38,18 @@ interface BRDStore {
     generatingSection: string | null;
     error: string | null;
     isApproved: boolean;
+
+    // NLP draft input
+    nlpInput: string;
+    setNlpInput: (text: string) => void;
+
+    // Custom prompts per section
+    customPrompts: Record<string, string>;
+    setCustomPrompt: (sectionId: string, prompt: string) => void;
+    resetCustomPrompt: (sectionId: string) => void;
+    loadCustomPrompts: (sessionId: string) => void;
+    saveCustomPrompts: (sessionId: string) => void;
+
     generateAll: (sessionId: string) => Promise<void>;
     generateSection: (sessionId: string, sectionId: string) => Promise<void>;
     loadBRD: (sessionId: string) => Promise<void>;
@@ -81,9 +93,38 @@ export const useBRDStore = create<BRDStore>((set, get) => ({
     error: null,
     isApproved: false,
 
+    // NLP draft input
+    nlpInput: '',
+    setNlpInput: (text: string) => set({ nlpInput: text }),
+
+    // Custom prompts per section
+    customPrompts: {},
+    setCustomPrompt: (sectionId: string, prompt: string) =>
+        set((state) => ({ customPrompts: { ...state.customPrompts, [sectionId]: prompt } })),
+    resetCustomPrompt: (sectionId: string) => {
+        const { customPrompts, ...rest } = get();
+        const next = { ...customPrompts };
+        delete next[sectionId];
+        set({ customPrompts: next });
+    },
+    loadCustomPrompts: (sessionId: string) => {
+        if (typeof window === 'undefined') return;
+        try {
+            const raw = localStorage.getItem(`brd_prompts_${sessionId}`);
+            if (raw) set({ customPrompts: JSON.parse(raw) });
+        } catch { /* ignore */ }
+    },
+    saveCustomPrompts: (sessionId: string) => {
+        if (typeof window === 'undefined') return;
+        try {
+            localStorage.setItem(`brd_prompts_${sessionId}`, JSON.stringify(get().customPrompts));
+        } catch { /* ignore */ }
+    },
+
     /**
      * Trigger BRD generation.
      * Shows a generating state — this call takes 30-90 seconds.
+     * Passes NLP input + custom prompts as additional context.
      */
     generateAll: async (sessionId) => {
         set({ generating: true, error: null });
@@ -92,10 +133,33 @@ export const useBRDStore = create<BRDStore>((set, get) => ({
                 localStorage.removeItem(`brd_approved_${sessionId}`);
             }
             set({ isApproved: false });
-            const res = await generateBRD(sessionId);
-            set({ snapshotId: res.snapshot_id });
-            // Once done, immediately load the results
-            await get().loadBRD(sessionId);
+
+            const state = get();
+            const nlpInput = state.nlpInput.trim();
+            const customPrompts = state.customPrompts;
+            const hasCustomInput = nlpInput.length > 0 || Object.keys(customPrompts).some(k => customPrompts[k].trim().length > 0);
+
+            if (!hasCustomInput) {
+                // No NLP input or custom prompts — use standard generation
+                const res = await generateBRD(sessionId);
+                set({ snapshotId: res.snapshot_id });
+                await get().loadBRD(sessionId);
+            } else {
+                // Generate each section individually with NLP context
+                for (const { id: sectionId } of SECTION_META) {
+                    const customPrompt = customPrompts[sectionId]?.trim();
+                    const parts: string[] = [];
+                    if (customPrompt) parts.push(`USER PROMPT FOR THIS SECTION:\n${customPrompt}`);
+                    if (nlpInput) parts.push(`ADDITIONAL CONTEXT FROM USER DRAFT INPUT:\n${nlpInput}`);
+                    const additionalContext = parts.length > 0 ? parts.join('\n\n') : '';
+                    try {
+                        await generateBRDSection(sessionId, sectionId as string, additionalContext);
+                    } catch {
+                        // Continue generating other sections even if one fails
+                    }
+                }
+                await get().loadBRD(sessionId);
+            }
         } catch (e) {
             set({ error: e instanceof Error ? e.message : 'Generation failed' });
         } finally {
@@ -105,6 +169,7 @@ export const useBRDStore = create<BRDStore>((set, get) => ({
 
     /**
      * Trigger generation for a single BRD section.
+     * Passes NLP input + custom prompt as additional context to the agent.
      */
     generateSection: async (sessionId, sectionId) => {
         set({ generatingSection: sectionId, error: null });
@@ -113,7 +178,16 @@ export const useBRDStore = create<BRDStore>((set, get) => ({
                 localStorage.removeItem(`brd_approved_${sessionId}`);
             }
             set({ isApproved: false });
-            await generateBRDSection(sessionId, sectionId);
+
+            const state = get();
+            const nlpInput = state.nlpInput.trim();
+            const customPrompt = state.customPrompts[sectionId]?.trim();
+            const parts: string[] = [];
+            if (customPrompt) parts.push(`USER PROMPT FOR THIS SECTION:\n${customPrompt}`);
+            if (nlpInput) parts.push(`ADDITIONAL CONTEXT FROM USER DRAFT INPUT:\n${nlpInput}`);
+            const additionalContext = parts.length > 0 ? parts.join('\n\n') : '';
+
+            await generateBRDSection(sessionId, sectionId, additionalContext);
             // Reload the results
             await get().loadBRD(sessionId);
         } catch (e) {

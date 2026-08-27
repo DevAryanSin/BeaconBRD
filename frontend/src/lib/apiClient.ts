@@ -381,9 +381,18 @@ export async function generateBRD(
 
 export async function generateBRDSection(
     sessionId: string,
-    sectionName: string
+    sectionName: string,
+    additionalContext?: string
 ): Promise<{ message: string; content: string }> {
-    return apiFetch(`/sessions/${sessionId}/brd/sections/${sectionName}/generate`, { method: "POST" });
+    const body: Record<string, string> = {};
+    if (additionalContext?.trim()) {
+        body.additional_context = additionalContext.trim();
+    }
+    return apiFetch(`/sessions/${sessionId}/brd/sections/${sectionName}/generate`, {
+        method: "POST",
+        headers: body.additional_context ? { "Content-Type": "application/json" } : undefined,
+        body: body.additional_context ? JSON.stringify(body) : undefined,
+    });
 }
 
 export function streamBRDGeneration(

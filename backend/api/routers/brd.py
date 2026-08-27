@@ -192,12 +192,18 @@ def generate_brd(session_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class GenerateSectionRequest(BaseModel):
+    additional_context: str = ""
+
 @router.post("/sections/{section_name}/generate")
-def regenerate_brd_section(session_id: str, section_name: str):
+def regenerate_brd_section(session_id: str, section_name: str, body: GenerateSectionRequest = None):
     """
     Regenerate a single BRD section.
+    Optionally accepts additional_context to guide the agent.
     """
     try:
+        additional_context = (body.additional_context if body else "") or ""
+
         # Get latest snapshot or create a new one
         conn, db_type = get_connection()
         cur = conn.cursor()
@@ -211,12 +217,13 @@ def regenerate_brd_section(session_id: str, section_name: str):
 
         if not snapshot_id:
             snapshot_id = create_snapshot(session_id)
-        
-        # run single agent
-        content = run_single_agent(session_id, snapshot_id, section_name, client=None)
-        
+
+        # Run single agent with optional additional context
+        content = run_single_agent(session_id, snapshot_id, section_name, client=None,
+                                    additional_context=additional_context)
+
         validate_brd(session_id)
-        
+
         return {"message": f"Section {section_name} regenerated successfully.", "content": content}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

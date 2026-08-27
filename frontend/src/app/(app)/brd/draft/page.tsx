@@ -1,0 +1,712 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+    AlertTriangle,
+    ChevronDown,
+    ChevronUp,
+    Clock,
+    Edit3,
+    FileText,
+    Loader2,
+    Lock,
+    RefreshCw,
+    Share2,
+    Unlock,
+    Zap,
+    Mail,
+    MessageSquare,
+    Check,
+    Sparkles,
+    MessageSquareText,
+    PanelLeftClose,
+    PanelRightClose,
+} from "lucide-react";
+
+import { cn } from "@/lib/utils";
+import Drawer from "@/components/ui/Drawer";
+import { ShareBoardModal } from "@/components/ShareBoardModal";
+import { useBRDStore } from "@/store/useBRDStore";
+import { useSessionStore } from "@/store/useSessionStore";
+import { useAuth } from "@/contexts/AuthContext";
+import { getChunks, getBRDSectionHistory, type Chunk, type SectionHistoryVersion } from "@/lib/apiClient";
+import type { Board } from "@/lib/firestore/boards";
+import NLPInputPanel from "@/components/workspace/NLPInputPanel";
+import SectionPromptEditor from "@/components/workspace/SectionPromptEditor";
+
+type SectionStatus = "generated" | "insufficient" | "human_edited" | "flagged";
+
+interface BRDSectionView {
+    id: string;
+    number: number;
+    title: string;
+    version: string;
+    status: SectionStatus;
+    timestamp?: string;
+    sourceCount: number;
+    sourceChunkIds: string[];
+    content: string;
+    flagType?: string;
+    flagSeverity?: "high" | "medium" | "low";
+    flagDescription?: string;
+}
+
+interface ValidationFlagView {
+    id: string;
+    section: string;
+    type: string;
+    severity: "high" | "medium" | "low";
+    description: string;
+    acknowledged: boolean;
+}
+
+const SECTION_META: { id: string; number: number; title: string }[] = [
+    { id: "executive_summary", number: 1, title: "Executive Summary" },
+    { id: "functional_requirements", number: 2, title: "Functional Requirements" },
+    { id: "stakeholder_analysis", number: 3, title: "Stakeholder Analysis" },
+    { id: "timeline", number: 4, title: "Timeline & Milestones" },
+    { id: "decisions", number: 5, title: "Key Decisions" },
+    { id: "assumptions", number: 6, title: "Assumptions & Constraints" },
+    { id: "success_metrics", number: 7, title: "Success Metrics" },
+];
+
+function StatusBadge({ status }: { status: SectionStatus }) {
+    const styleMap = {
+        generated: "bg-emerald-500/10 border-emerald-500/30 text-emerald-300",
+        insufficient: "bg-zinc-700/30 border-zinc-600/30 text-zinc-400",
+        human_edited: "bg-yellow-500/10 border-yellow-500/30 text-yellow-300",
+        flagged: "bg-red-500/10 border-red-500/30 text-red-300",
+    };
+    const labelMap = {
+        generated: "Generated",
+        insufficient: "Insufficient Data",
+        human_edited: "Human Edited",
+        flagged: "Flagged",
+    };
+    return <span className={cn("glass-badge", styleMap[status])}>{labelMap[status]}</span>;
+}
+
+function SectionCard({
+    section,
+    saving,
+    isGenerating,
+    onSave,
+    onRegenerate,
+    onViewAttribution,
+    onViewHistory,
+}: {
+    section: BRDSectionView;
+    saving: boolean;
+    isGenerating?: boolean;
+    onSave: (section: BRDSectionView, content: string) => Promise<void>;
+    onRegenerate: () => void;
+    onViewAttribution: (section: BRDSectionView) => void;
+    onViewHistory: (section: BRDSectionView) => void;
+}) {
+    const [editing, setEditing] = useState(false);
+    const [editContent, setEditContent] = useState(section.content);
+    const [ackFlag, setAckFlag] = useState(false);
+
+    useEffect(() => {
+        setEditContent(section.content);
+    }, [section.id, section.content]);
+
+    return (
+        <div
+            id={`section-${section.id}`}
+            className={cn("glass-card rounded-xl overflow-hidden", {
+                "border-red-500/30": section.status === "flagged" && !ackFlag,
+                "border-yellow-500/25": section.status === "human_edited",
+            })}
+        >
+            <div className="px-5 py-4 border-b border-white/8 flex items-center gap-3 flex-wrap">
+                <span className="font-mono text-xs text-zinc-600">S{section.number}</span>
+                <h3 className="text-sm font-semibold text-zinc-100 flex-1">{section.title}</h3>
+                <span className="glass-badge bg-white/5 border-white/10 text-zinc-500 text-[9px] font-mono">{section.version}</span>
+                <StatusBadge status={section.status} />
+                {section.status === "human_edited" && <Lock size={12} className="text-yellow-400" />}
+                {section.timestamp && (
+                    <span className="text-[10px] text-zinc-600 flex items-center gap-1">
+                        <Clock size={9} />
+                        {section.timestamp}
+                    </span>
+                )}
+                <div className="flex items-center gap-1 ml-1">
+                    <button
+                        onClick={() => setEditing((v) => !v)}
+                        className="p-1.5 rounded-lg text-zinc-600 hover:text-zinc-300 hover:bg-white/5 transition-colors"
+                        title={section.status === "human_edited" ? "Unlock & Edit" : "Edit"}
+                    >
+                        {section.status === "human_edited" ? <Unlock size={13} /> : <Edit3 size={13} />}
+                    </button>
+                    <button
+                        onClick={onRegenerate}
+                        disabled={isGenerating}
+                        className="p-1.5 rounded-lg text-zinc-600 hover:text-cyan-400 hover:bg-cyan-500/10 transition-colors disabled:opacity-50"
+                        title="Regenerate section"
+                    >
+                        {isGenerating ? <Loader2 size={13} className="animate-spin text-cyan-400" /> : <RefreshCw size={13} />}
+                    </button>
+                </div>
+            </div>
+
+            {section.status === "flagged" && !ackFlag && (
+                <div className="mx-5 mt-4 p-3 rounded-lg bg-red-500/8 border border-red-500/25 flex items-start gap-3">
+                    <AlertTriangle size={14} className="text-red-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-xs font-semibold text-red-300">{section.flagType}</span>
+                            <span
+                                className={cn(
+                                    "glass-badge text-[9px]",
+                                    section.flagSeverity === "high"
+                                        ? "badge-severity-high"
+                                        : section.flagSeverity === "medium"
+                                        ? "badge-severity-medium"
+                                        : "badge-severity-low"
+                                )}
+                            >
+                                {(section.flagSeverity ?? "medium").toUpperCase()}
+                            </span>
+                        </div>
+                        <p className="text-xs text-red-200/70">{section.flagDescription}</p>
+                    </div>
+                    <button
+                        onClick={() => setAckFlag(true)}
+                        className="text-xs text-zinc-400 hover:text-zinc-200 flex-shrink-0 bg-white/5 px-2.5 py-1 rounded-lg transition-colors"
+                    >
+                        Acknowledge
+                    </button>
+                </div>
+            )}
+
+            {section.status === "insufficient" && (
+                <div className="mx-5 mt-4 p-4 rounded-lg striped-bg border border-white/8 space-y-2">
+                    <p className="text-sm text-zinc-400 font-medium">Insufficient signal coverage</p>
+                    <p className="text-xs text-zinc-500">This section has no enough evidence yet. Ingest more data and regenerate.</p>
+                </div>
+            )}
+
+            {!editing && section.content && !isGenerating && (
+                <div className="px-5 py-4">
+                    <div className="prose prose-invert prose-sm max-w-none text-zinc-300 text-xs leading-relaxed whitespace-pre-line">
+                        {section.content}
+                    </div>
+                </div>
+            )}
+
+            {isGenerating && (
+                <div className="px-5 py-8 flex flex-col items-center justify-center gap-3 bg-white/2">
+                    <Loader2 size={24} className="animate-spin text-cyan-400" />
+                    <p className="text-xs text-cyan-300 font-medium">Regenerating section...</p>
+                </div>
+            )}
+
+            {editing && (
+                <div className="px-5 py-4">
+                    <textarea
+                        className="glass-input w-full font-mono text-xs p-3 rounded-lg resize-none"
+                        rows={12}
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                    />
+                    <div className="flex items-center justify-between mt-2">
+                        <span className="text-[10px] text-zinc-600 font-mono">{editContent.length} chars</span>
+                        <div className="flex gap-2">
+                            <button onClick={() => setEditing(false)} className="btn-ghost text-xs py-1.5">
+                                Cancel
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    await onSave(section, editContent);
+                                    setEditing(false);
+                                }}
+                                disabled={saving}
+                                className="btn-primary text-xs py-1.5 disabled:opacity-50"
+                            >
+                                {saving ? "Saving..." : "Save Changes"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <div className="px-5 py-3 border-t border-white/5 flex items-center gap-3">
+                <span className="text-[11px] text-zinc-600">Generated from {section.sourceCount} signals</span>
+                <button onClick={() => onViewAttribution(section)} className="text-[11px] text-cyan-400 hover:text-cyan-300 transition-colors">
+                    View Attribution
+                </button>
+                <button onClick={() => onViewHistory(section)} className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors">
+                    Version History
+                </button>
+            </div>
+        </div>
+    );
+}
+
+function SourceTypeBadge({ sourceType }: { sourceType?: string }) {
+    const type = (sourceType || "").toLowerCase();
+    let label = "User Doc";
+    let bgClass = "bg-cyan-500/10 border-cyan-500/20 text-cyan-300";
+    let Icon = FileText;
+
+    if (type === "gmail" || type === "email") {
+        label = "Gmail";
+        bgClass = "bg-red-500/10 border border-red-500/20 text-red-300";
+        Icon = Mail;
+    } else if (type === "slack") {
+        label = "Slack";
+        bgClass = "bg-indigo-500/10 border border-indigo-500/20 text-indigo-300";
+        Icon = MessageSquare;
+    } else if (type === "file" || type === "doc" || type === "user_upload") {
+        label = "User Doc";
+        bgClass = "bg-blue-500/10 border border-blue-500/20 text-blue-300";
+        Icon = FileText;
+    }
+
+    return (
+        <span className={cn("glass-badge text-[10px] font-semibold tracking-wide uppercase px-2 py-0.5 rounded flex items-center gap-1.5 border", bgClass)}>
+            <Icon size={10} className="flex-shrink-0" />
+            {label}
+        </span>
+    );
+}
+
+function SignalLabelBadge({ label }: { label?: string }) {
+    const l = (label || "unknown").toLowerCase();
+    let bgClass = "bg-zinc-500/10 border border-zinc-500/20 text-zinc-400";
+    if (l === "requirement") {
+        bgClass = "bg-emerald-500/10 border border-emerald-500/20 text-emerald-300";
+    } else if (l === "decision") {
+        bgClass = "bg-purple-500/10 border border-purple-500/20 text-purple-300";
+    } else if (l === "stakeholder_feedback" || l === "feedback") {
+        bgClass = "bg-amber-500/10 border border-amber-500/20 text-amber-300";
+    } else if (l === "timeline_reference" || l === "timeline") {
+        bgClass = "bg-blue-500/10 border border-blue-500/20 text-blue-300";
+    }
+    return (
+        <span className={cn("glass-badge text-[10px] font-medium px-2 py-0.5 rounded border capitalize", bgClass)}>
+            {l.replace("_", " ")}
+        </span>
+    );
+}
+
+export default function BRDDraftPage() {
+    const { activeSessionId, sessions } = useSessionStore();
+    const { user } = useAuth();
+    const sessionId = activeSessionId ?? "";
+    const {
+        sections, flags: apiFlags, loading, generating, generatingSection, error,
+        generateAll, generateSection, loadBRD, updateSection, acknowledgeFlag, approveAll,
+        nlpInput, setNlpInput, customPrompts, loadCustomPrompts, saveCustomPrompts,
+    } = useBRDStore();
+
+    const [leftPanelOpen, setLeftPanelOpen] = useState(true);
+    const [rightPanelOpen, setRightPanelOpen] = useState(true);
+    const [flagsExpanded, setFlagsExpanded] = useState(false);
+    const [flags, setFlags] = useState<ValidationFlagView[]>([]);
+    const [attrDrawer, setAttrDrawer] = useState<BRDSectionView | null>(null);
+    const [histDrawer, setHistDrawer] = useState<BRDSectionView | null>(null);
+    const [historyList, setHistoryList] = useState<SectionHistoryVersion[]>([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [allChunks, setAllChunks] = useState<Chunk[]>([]);
+    const [chunkLoading, setChunkLoading] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
+
+    // Load custom prompts when session changes
+    useEffect(() => {
+        if (sessionId) {
+            loadCustomPrompts(sessionId);
+        }
+    }, [sessionId, loadCustomPrompts]);
+
+    // Save custom prompts when they change
+    useEffect(() => {
+        if (sessionId && Object.keys(customPrompts).length > 0) {
+            const timer = setTimeout(() => saveCustomPrompts(sessionId), 500);
+            return () => clearTimeout(timer);
+        }
+    }, [customPrompts, sessionId, saveCustomPrompts]);
+
+    useEffect(() => {
+        if (!histDrawer || !sessionId) {
+            setHistoryList([]);
+            return;
+        }
+        const fetchHistory = async () => {
+            setHistoryLoading(true);
+            try {
+                const res = await getBRDSectionHistory(sessionId, histDrawer.id);
+                setHistoryList(res.history);
+            } catch {
+                setHistoryList([]);
+            } finally {
+                setHistoryLoading(false);
+            }
+        };
+        fetchHistory();
+    }, [histDrawer, sessionId]);
+
+    const activeSession = sessions.find((s) => s.id === sessionId);
+    const boardForShare: Board | null =
+        activeSession && sessionId
+            ? {
+                  id: sessionId,
+                  title: activeSession.name ?? "Untitled BRD",
+                  description: activeSession.description ?? "",
+                  ownerUid: activeSession.role === "owner" ? (user?.uid ?? "") : "shared",
+                  status: activeSession.status ?? "draft",
+                  createdAt: new Date() as unknown as any,
+                  updatedAt: new Date() as unknown as any,
+              }
+            : null;
+
+    useEffect(() => {
+        if (!sessionId) {
+            setAllChunks([]);
+            return;
+        }
+        loadBRD(sessionId);
+    }, [sessionId]);
+
+    useEffect(() => {
+        const loadChunks = async () => {
+            if (!sessionId) return;
+            setChunkLoading(true);
+            try {
+                const res = await getChunks(sessionId, "all");
+                setAllChunks(res.chunks);
+            } catch {
+                setAllChunks([]);
+            } finally {
+                setChunkLoading(false);
+            }
+        };
+        loadChunks();
+    }, [sessionId, generating]);
+
+    useEffect(() => {
+        setFlags(
+            apiFlags.map((f, i) => {
+                const key = `${f.section_name}::${f.flag_type}::${f.description}`;
+                return {
+                    id: String(i),
+                    section: f.section_name,
+                    type: f.flag_type,
+                    severity: f.severity,
+                    description: f.description,
+                    acknowledged: false,
+                };
+            })
+        );
+    }, [apiFlags]);
+
+    const displaySections: BRDSectionView[] = useMemo(
+        () =>
+            SECTION_META.map((meta) => {
+                const storeSection = sections.find((s) => s.id === meta.id);
+                const flagForSection = flags.find((f) => f.section === meta.id && !f.acknowledged);
+                const content = storeSection?.content ?? "";
+                const hasInsufficientData = content.toLowerCase().includes("insufficient data");
+                const status: SectionStatus = storeSection?.humanEdited
+                    ? "human_edited"
+                    : flagForSection
+                    ? "flagged"
+                    : !content || hasInsufficientData
+                    ? "insufficient"
+                    : "generated";
+                return {
+                    id: meta.id,
+                    number: meta.number,
+                    title: meta.title,
+                    version: `v${storeSection?.version ?? 1}`,
+                    status,
+                    content,
+                    sourceCount: storeSection?.sourceChunkIds?.length ?? 0,
+                    sourceChunkIds: storeSection?.sourceChunkIds ?? [],
+                    flagType: flagForSection?.type,
+                    flagSeverity: flagForSection?.severity,
+                    flagDescription: flagForSection?.description,
+                    timestamp: storeSection?.generatedAt
+                        ? new Date(storeSection.generatedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })
+                        : undefined,
+                };
+            }),
+        [sections, flags]
+    );
+
+    const chunkById = useMemo(() => new Map(allChunks.map((chunk) => [chunk.chunk_id, chunk])), [allChunks]);
+    const attributionChunks = useMemo(() => {
+        if (!attrDrawer) return [];
+        return attrDrawer.sourceChunkIds.map((id) => chunkById.get(id)).filter((c): c is Chunk => Boolean(c));
+    }, [attrDrawer, chunkById]);
+
+    const unacknowledgedFlags = flags.filter((f) => !f.acknowledged);
+    const highCount = unacknowledgedFlags.filter((f) => f.severity === "high").length;
+    const medCount = unacknowledgedFlags.filter((f) => f.severity === "medium").length;
+
+    const scrollTo = (id: string) => {
+        document.getElementById(`section-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+
+    const hasNLPInput = nlpInput.trim().length > 0;
+    const hasCustomPrompts = Object.values(customPrompts).some((p) => p.trim().length > 0);
+
+    // Compute left panel width class
+    const leftPanelClass = leftPanelOpen ? "w-64" : "w-0";
+    const rightPanelClass = rightPanelOpen ? "w-72" : "w-0";
+
+    return (
+        <div className="flex h-full overflow-hidden">
+            {/* ─── Left Panel: NLP Input ─── */}
+            <motion.aside
+                animate={{ width: leftPanelOpen ? 256 : 0 }}
+                transition={{ type: "spring", damping: 28, stiffness: 240 }}
+                className="flex-shrink-0 border-r border-white/8 overflow-hidden"
+            >
+                <div className="w-64 h-full overflow-y-auto p-4">
+                    <NLPInputPanel />
+                </div>
+            </motion.aside>
+
+            {/* Left toggle */}
+            <button
+                onClick={() => setLeftPanelOpen((v) => !v)}
+                className="flex-shrink-0 w-6 flex items-center justify-center text-zinc-700 hover:text-zinc-400 transition-colors border-r border-white/5"
+                title={leftPanelOpen ? "Hide Draft Input" : "Show Draft Input"}
+            >
+                {leftPanelOpen ? <PanelLeftClose size={12} /> : <Sparkles size={12} />}
+            </button>
+
+            {/* ─── Main Content: Section Cards ─── */}
+            <div className="flex-1 overflow-y-auto min-w-0">
+                {unacknowledgedFlags.length > 0 && (
+                    <div className="mx-6 mt-5">
+                        <div className="glass-card rounded-xl overflow-hidden border-red-500/20">
+                            <button onClick={() => setFlagsExpanded((v) => !v)} className="w-full flex items-center gap-3 px-4 py-3">
+                                <AlertTriangle size={14} className="text-red-400" />
+                                <span className="text-sm font-medium text-red-300">
+                                    {unacknowledgedFlags.length} Validation {unacknowledgedFlags.length === 1 ? "Flag" : "Flags"}
+                                </span>
+                                <div className="flex items-center gap-1.5 ml-1">
+                                    {highCount > 0 && <span className="glass-badge badge-severity-high text-[9px]">{highCount} HIGH</span>}
+                                    {medCount > 0 && <span className="glass-badge badge-severity-medium text-[9px]">{medCount} MED</span>}
+                                </div>
+                                <div className="ml-auto text-zinc-600">{flagsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</div>
+                            </button>
+                            <AnimatePresence>
+                                {flagsExpanded && (
+                                    <motion.div initial={{ height: 0 }} animate={{ height: "auto" }} exit={{ height: 0 }} className="overflow-hidden">
+                                        <div className="px-4 pb-4 space-y-2 border-t border-white/8 pt-3">
+                                            {flags.map((flag) => (
+                                                <div key={flag.id} className={cn("flex items-start gap-3 p-3 rounded-lg", flag.acknowledged ? "opacity-40" : "bg-white/3")}>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2 mb-0.5">
+                                                            <span className="text-xs font-medium text-zinc-300">{flag.section}</span>
+                                                            <span
+                                                                className={cn("glass-badge text-[9px]", {
+                                                                    "badge-severity-high": flag.severity === "high",
+                                                                    "badge-severity-medium": flag.severity === "medium",
+                                                                    "badge-severity-low": flag.severity === "low",
+                                                                })}
+                                                            >
+                                                                {flag.severity.toUpperCase()}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-xs text-zinc-500">{flag.description}</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                    </div>
+                )}
+
+                {generating && (
+                    <div className="mx-6 mt-5 glass-card rounded-xl p-5 flex items-center gap-4">
+                        <Loader2 size={20} className="animate-spin text-cyan-400 flex-shrink-0" />
+                        <div>
+                            <p className="text-sm font-semibold text-cyan-300">Generating BRD sections...</p>
+                            <p className="text-xs text-zinc-500 mt-0.5">
+                                {hasNLPInput || hasCustomPrompts
+                                    ? "Applying your draft input and custom prompts..."
+                                    : "Running multi-agent generation. This can take 30-90 seconds."}
+                            </p>
+                        </div>
+                    </div>
+                )}
+                {error && (
+                    <div className="mx-6 mt-5 glass-card rounded-xl p-4 border-red-500/30">
+                        <p className="text-sm text-red-300">{error}</p>
+                    </div>
+                )}
+
+                <div className="p-6 space-y-5">
+                    {(generating ? [] : displaySections).map((section, i) => (
+                        <motion.div key={section.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: i * 0.05 }}>
+                            <SectionCard
+                                section={section}
+                                saving={loading}
+                                isGenerating={generatingSection === section.id}
+                                onSave={async (s, nextContent) => updateSection(sessionId, s.id, nextContent)}
+                                onRegenerate={() => generateSection(sessionId, section.id)}
+                                onViewAttribution={(s) => setAttrDrawer(s)}
+                                onViewHistory={(s) => setHistDrawer(s)}
+                            />
+                        </motion.div>
+                    ))}
+
+                    {!generating && displaySections.every((s) => !s.content) && !loading && (
+                        <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
+                            <FileText size={36} className="text-zinc-700" />
+                            <p className="text-sm text-zinc-500">No BRD generated yet.</p>
+                            <p className="text-xs text-zinc-600 max-w-sm">
+                                Use the Draft Input panel to describe your project, or customize section prompts, then generate.
+                            </p>
+                            <button onClick={() => generateAll(sessionId)} className="btn-primary text-sm mt-1 flex items-center gap-2">
+                                <Zap size={14} /> Generate BRD Draft
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* ─── Right Panel: Section Prompts ─── */}
+            <motion.aside
+                animate={{ width: rightPanelOpen ? 288 : 0 }}
+                transition={{ type: "spring", damping: 28, stiffness: 240 }}
+                className="flex-shrink-0 border-l border-white/8 overflow-hidden"
+            >
+                <div className="w-72 h-full overflow-y-auto p-4">
+                    <SectionPromptEditor />
+                </div>
+            </motion.aside>
+
+            {/* Right toggle */}
+            <button
+                onClick={() => setRightPanelOpen((v) => !v)}
+                className="flex-shrink-0 w-6 flex items-center justify-center text-zinc-700 hover:text-zinc-400 transition-colors border-l border-white/5"
+                title={rightPanelOpen ? "Hide Section Prompts" : "Show Section Prompts"}
+            >
+                {rightPanelOpen ? <PanelRightClose size={12} /> : <MessageSquareText size={12} />}
+            </button>
+
+            {/* ─── Drawers & Modals ─── */}
+            {boardForShare && <ShareBoardModal board={boardForShare} isOpen={shareOpen} onClose={() => setShareOpen(false)} />}
+
+            <Drawer
+                open={Boolean(attrDrawer)}
+                onClose={() => setAttrDrawer(null)}
+                title={attrDrawer?.title ?? ""}
+                subtitle={`${attrDrawer?.sourceCount ?? 0} contributing signals`}
+            >
+                {chunkLoading ? (
+                    <div className="text-xs text-zinc-500 flex items-center gap-2">
+                        <Loader2 size={12} className="animate-spin" /> Loading source chunks...
+                    </div>
+                ) : attributionChunks.length === 0 ? (
+                    <div className="text-xs text-zinc-500">No source chunks were found for this section.</div>
+                ) : (
+                    <div className="space-y-3">
+                        {attributionChunks.map((chunk) => (
+                            <div key={chunk.chunk_id} className="glass-card p-3.5 rounded-xl border border-white/5 bg-white/3">
+                                <p className="text-xs text-zinc-200 leading-relaxed mb-3 italic">"{chunk.cleaned_text}"</p>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <SourceTypeBadge sourceType={chunk.source_type} />
+                                    <SignalLabelBadge label={chunk.signal_label ?? chunk.label} />
+                                    {chunk.speaker && (
+                                        <span className="text-[10px] text-zinc-400 bg-white/5 px-2 py-0.5 rounded border border-white/5">
+                                            {chunk.speaker}
+                                        </span>
+                                    )}
+                                    <span className="font-mono text-[10px] text-zinc-500 max-w-[200px] truncate" title={chunk.source_ref}>
+                                        {chunk.source_ref}
+                                    </span>
+                                    <span className="ml-auto text-[10px] font-mono text-emerald-400">{Math.round((chunk.confidence ?? 0) * 100)}% Match</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </Drawer>
+
+            <Drawer open={Boolean(histDrawer)} onClose={() => setHistDrawer(null)} title={histDrawer?.title ?? ""} subtitle="Version history">
+                {historyLoading ? (
+                    <div className="text-xs text-zinc-500 flex items-center gap-2">
+                        <Loader2 size={12} className="animate-spin" /> Loading version history...
+                    </div>
+                ) : historyList.length === 0 ? (
+                    <div className="text-xs text-zinc-500">No historical versions were found for this section.</div>
+                ) : (
+                    <div className="space-y-4">
+                        {historyList.map((version, idx) => (
+                            <div key={version.version_number} className="glass-card p-4 rounded-xl border border-white/5 bg-white/3 space-y-3">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-mono text-xs text-zinc-200 font-bold bg-white/5 px-2 py-0.5 rounded">
+                                        v{version.version_number}
+                                    </span>
+                                    {idx === 0 && (
+                                        <span className="glass-badge bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[9px] font-semibold px-2 py-0.5 rounded">
+                                            Current Version
+                                        </span>
+                                    )}
+                                    {version.human_edited ? (
+                                        <span className="glass-badge bg-yellow-500/10 border border-yellow-500/20 text-yellow-300 text-[9px] font-semibold px-2 py-0.5 rounded flex items-center gap-1">
+                                            <Lock size={8} className="text-yellow-400" /> Human Edited
+                                        </span>
+                                    ) : (
+                                        <span className="glass-badge bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-[9px] font-semibold px-2 py-0.5 rounded flex items-center gap-1">
+                                            <Zap size={8} className="text-cyan-400" /> AI Generated
+                                        </span>
+                                    )}
+                                    {version.generated_at && (
+                                        <span className="text-[10px] text-zinc-500 ml-auto flex items-center gap-1">
+                                            <Clock size={10} />
+                                            {new Date(version.generated_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div className="bg-black/20 rounded-lg p-3 border border-white/5">
+                                    <h4 className="text-[10px] text-zinc-500 uppercase tracking-wider mb-1 font-semibold">Content Preview</h4>
+                                    <p className="text-xs text-zinc-300 whitespace-pre-line leading-relaxed max-h-40 overflow-y-auto">
+                                        {version.content || <span className="italic text-zinc-600">No content</span>}
+                                    </p>
+                                </div>
+
+                                <div>
+                                    <h4 className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2 font-semibold">Contributing Info Chunks ({version.chunks?.length ?? 0})</h4>
+                                    {(!version.chunks || version.chunks.length === 0) ? (
+                                        <p className="text-[11px] text-zinc-600 italic">No source chunks associated with this version.</p>
+                                    ) : (
+                                        <div className="space-y-2">
+                                            {version.chunks.map((chunk) => (
+                                                <div key={chunk.chunk_id} className="p-2.5 rounded-lg bg-white/2 border border-white/5 space-y-1.5 bg-white/3">
+                                                    <p className="text-xs text-zinc-300 italic leading-relaxed">"{chunk.cleaned_text}"</p>
+                                                    <div className="flex items-center gap-2 flex-wrap text-[10px]">
+                                                        <SourceTypeBadge sourceType={chunk.source_type} />
+                                                        <SignalLabelBadge label={chunk.signal_label ?? chunk.label} />
+                                                        {chunk.speaker && (
+                                                            <span className="text-zinc-400 bg-white/3 px-1.5 py-0.5 rounded">{chunk.speaker}</span>
+                                                        )}
+                                                        <span className="text-zinc-500 font-mono truncate max-w-[150px]" title={chunk.source_ref}>
+                                                            {chunk.source_ref}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </Drawer>
+        </div>
+    );
+}
