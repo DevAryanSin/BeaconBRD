@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Sparkles, X, HelpCircle, ChevronRight } from "lucide-react";
+import { Sparkles, X, HelpCircle, ChevronRight, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useBRDStore } from "@/store/useBRDStore";
 import { classifyNLPInput, getTopSections, type SectionKey } from "@/lib/nlpClassify";
@@ -48,7 +48,7 @@ function ScorePill({ score }: { score: number }) {
     );
 }
 
-export default function NLPInputPanel() {
+export default function NLPInputPanel({ onSend }: { onSend?: () => void }) {
     const nlpInput = useBRDStore((s) => s.nlpInput);
     const setNlpInput = useBRDStore((s) => s.setNlpInput);
     const generating = useBRDStore((s) => s.generating);
@@ -58,6 +58,15 @@ export default function NLPInputPanel() {
     const hasInput = nlpInput.trim().length > 0;
 
     const handleClear = () => setNlpInput("");
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            if (hasInput && !generating && onSend) {
+                onSend();
+            }
+        }
+    };
 
     return (
         <div className="space-y-3">
@@ -73,19 +82,30 @@ export default function NLPInputPanel() {
                 <textarea
                     value={nlpInput}
                     onChange={(e) => setNlpInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
                     placeholder="Describe your project, requirements, goals, constraints...&#10;&#10;Example: We need a user authentication system with OAuth2 login, support for 10k concurrent users, and a Q4 2025 launch target."
-                    className="glass-input w-full text-xs p-3 rounded-lg resize-none leading-relaxed"
+                    className="glass-input w-full text-xs p-3 pr-16 rounded-lg resize-none leading-relaxed"
                     rows={8}
                     disabled={generating}
                 />
                 {hasInput && (
-                    <button
-                        onClick={handleClear}
-                        className="absolute top-2 right-2 p-1 rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-white/5 transition-colors"
-                        title="Clear input"
-                    >
-                        <X size={12} />
-                    </button>
+                    <div className="absolute top-2 right-2 flex items-center gap-1">
+                        <button
+                            onClick={handleClear}
+                            className="p-1 rounded-md text-zinc-600 hover:text-zinc-300 hover:bg-white/5 transition-colors"
+                            title="Clear input"
+                        >
+                            <X size={12} />
+                        </button>
+                        <button
+                            onClick={() => { if (hasInput && !generating && onSend) onSend(); }}
+                            disabled={generating || !onSend}
+                            className="p-1 rounded-md text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/10 transition-colors disabled:opacity-30"
+                            title="Generate BRD (Ctrl+Enter)"
+                        >
+                            <Send size={12} />
+                        </button>
+                    </div>
                 )}
             </div>
 
@@ -128,8 +148,7 @@ export default function NLPInputPanel() {
 
             {/* Hint */}
             <p className="text-[10px] text-zinc-700 leading-relaxed">
-                This input is sent to every section agent as additional context during generation.
-                Use per-section prompts below for more targeted control.
+                Press <kbd className="font-mono text-zinc-500 bg-white/5 px-1 rounded">Ctrl+Enter</kbd> or click the send button to generate.
             </p>
         </div>
     );

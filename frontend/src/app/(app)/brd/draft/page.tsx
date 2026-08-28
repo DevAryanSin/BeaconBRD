@@ -466,7 +466,7 @@ export default function BRDDraftPage() {
                 className="flex-shrink-0 border-r border-white/8 overflow-hidden"
             >
                 <div className="w-64 h-full overflow-y-auto p-4">
-                    <NLPInputPanel />
+                    <NLPInputPanel onSend={() => generateAll(sessionId)} />
                 </div>
             </motion.aside>
 
